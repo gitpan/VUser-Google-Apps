@@ -3,7 +3,7 @@ use warnings;
 use strict;
 
 # Copyright (c) 2006 Randy Smith <perlstalker@vuser.org>
-# $Id: Apps.pm,v 1.2 2007/09/20 16:54:00 perlstalker Exp $
+# $Id: Apps.pm,v 1.6 2008/10/29 05:13:03 perlstalker Exp $
 
 use VUser::Log qw(:levels);
 use VUser::ExtLib qw(:config);
@@ -13,7 +13,7 @@ use VUser::Meta;
 use VUser::Google::ProvisioningAPI;
 use Config::IniFiles;
 
-our $VERSION = '0.1.0';
+our $VERSION = '0.1.1';
 
 our $log;
 our %meta = ('username' => VUser::Meta->new('name' => 'username',
@@ -105,6 +105,8 @@ sub init {
 	$eh->register_task('email', 'del', \&email_del);
 	$eh->register_task('email', 'info', \&email_info);
 	$eh->register_task('email', 'list', \&email_list);
+	$eh->register_task('email', 'suspend', \&email_suspend);
+	$eh->register_task('email', 'release', \&email_release);
     }
 
     # gapps
@@ -286,7 +288,10 @@ sub email_mod {
 
     my %gopts = ('username' => $user,
 		 'domain' => $domain);
-    $gopts{'new-username'} = $opts->{'newaccount'} if $opts->{'newaccount'};
+    if ($opts->{'newaccount'}
+	and $opts->{'newaccount'} ne $opts->{'account'}) {
+	$gopts{'new-username'} = $opts->{'newaccount'};
+    }
 
     # Try to guess given and family names.
     if ($opts->{'name'}) {
@@ -334,6 +339,52 @@ sub email_del {
 
     # Now run the Google Apps tasks
     $eh->run_tasks('gapps', 'deleteuser', $cfg, %gopts);
+
+    return undef;
+}
+
+sub email_suspend {
+    my ($cfg, $opts, $action, $eh) = @_;
+
+    # Split off domain
+    my ($user, $domain);
+    VUser::Email::split_address($cfg, $opts->{'account'}, \$user, \$domain);
+
+    # Try to guess given and family names.
+    my ($givenname, $familyname) = split (/ /, $opts->{'name'});
+    $givenname = 'User' if (not $givenname);
+    $familyname = $user if not $familyname;
+
+    my %gopts = ('username' => $user,
+		 'domain' => $domain,
+		 );
+    $gopts{'quota'} = $opts->{'quota'} if $opts->{'quota'};
+
+    # Now run the Google Apps tasks
+    $eh->run_tasks('gapps', 'suspenduser', $cfg, %gopts);
+
+    return undef;
+}
+
+sub email_release {
+    my ($cfg, $opts, $action, $eh) = @_;
+
+    # Split off domain
+    my ($user, $domain);
+    VUser::Email::split_address($cfg, $opts->{'account'}, \$user, \$domain);
+
+    # Try to guess given and family names.
+    my ($givenname, $familyname) = split (/ /, $opts->{'name'});
+    $givenname = 'User' if (not $givenname);
+    $familyname = $user if not $familyname;
+
+    my %gopts = ('username' => $user,
+		 'domain' => $domain,
+		 );
+    $gopts{'quota'} = $opts->{'quota'} if $opts->{'quota'};
+
+    # Now run the Google Apps tasks
+    $eh->run_tasks('gapps', 'restoreuser', $cfg, %gopts);
 
     return undef;
 }

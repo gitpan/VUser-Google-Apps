@@ -8,7 +8,7 @@ use strict;
 
 use vars qw($VERSION);
 
-our $VERSION = '0.20';
+our $VERSION = '0.21';
 
 use Carp;
 use LWP::UserAgent qw(:strict);
@@ -496,13 +496,17 @@ sub CreateUser {
 	return undef;
     }
 
-    my ($username, $given_name, $family_name, $password, $quotaMB) = @_;
+    my ($username, $given_name, $family_name, $password, $quotaMB, $forceChange) = @_;
+    $forceChange = $forceChange? 1 : 0;
 
     my $body = $self->XMLPrefix;
-    $body .= <<"EOL";
-<atom:category scheme="http://schemas.google.com/g/2005#kind" term="http://schemas.google.com/apps/2006#user"/>
-<apps:login userName="$username" password="$password" suspended="false"/>
-EOL
+    #LP:changePasswordAtNextLogin (todo)
+    $body .= '<atom:category scheme="http://schemas.google.com/g/2005#kind" term="http://schemas.google.com/apps/2006#user"/>';
+    $body .= "<apps:login userName=\"$username\" password=\"$password\" suspended=\"false\"";
+    if ($forceChange) {
+	$body .= ' changePasswordAtNextLogin="true"';
+    }
+    $body .= "/>";
     $body .= "<apps:quota limit=\"$quotaMB\"/>" if defined $quotaMB; 
     $body .= "<apps:name familyName=\"$family_name\" givenName=\"$given_name\"/>";
     $body .= $self->XMLPostfix;
@@ -585,14 +589,19 @@ sub RetrieveAllUsers {
 	    # dataset is discarded.
 	    return undef;
 	}
+	$last_page = 1; # gets reset to 0 if there are more pages
 	# Look through the links to see if there's another page.
 	# A link with rel=next means that we have another page to look at.
+	#
+	# TODO: May be more efficient with a last; in the else but
+	# I had problems with infinite loops while trying to get it
+	# sorted out.
 	foreach my $link (@{ $self->{result}{'link'} }) {
 	    if ($link->{'rel'} eq 'next') {
 		$url = $link->{'href'};
 		$last_page = 0;
-	    } else {
-		$last_page = 1;
+#	    } else {
+#		$last_page = 1;
 	    }
 	}
     }
@@ -634,7 +643,7 @@ sub RetrievePageOfUsers {
 
     my @entries = ();
     if ($self->Request('GET', $url)) {			   
-	foreach my $entry (@{ $self->{result}{'atom:feed'}{'atom:entry'} }) {
+	foreach my $entry (@{ $self->{result}{'entry'} }) {
 	    push @entries, $self->buildEntry($entry);
 	}
     } else {
@@ -681,11 +690,15 @@ sub UpdateUser {
     if (defined ($new_entry->User)
 	or defined ($new_entry->Password)
 	or defined ($new_entry->isSuspended)
+	or defined ($new_entry->changePasswordAtNextLogin)
 	) {
 	$body .= '<apps:login';
 	$body .= ' userName="'.$new_entry->User.'"' if defined $new_entry->User;
 	$body .= ' password="'.$new_entry->Password.'"' if defined $new_entry->Password;
 	$body .= ' suspended="'.($new_entry->isSuspended? 'true' : 'false').'"';
+	#LP:changePasswordAtNextLogin
+	print "too(".$new_entry->changePasswordAtNextLogin.")";
+	$body .= ' changePasswordAtNextLogin="'.($new_entry->changePasswordAtNextLogin? 'true' : 'false').'"';
 	$body .= '/>';
     }
 
@@ -1208,14 +1221,14 @@ RetrievePageOfEmailLists($startList)
 
 Get a single page (100 lists) of email lists.
 
-=cut
+=back
 
 =cut
 
 sub RetrievePageOfEmailLists {
     my $self = shift;
 
-    my $start_emaillist;
+    my $start_emaillist = shift;
 
     my $url = GOOGLEBASEURL.$self->{domain}."/emailList/$APIVersion";
     if ($start_emaillist) {
@@ -1482,6 +1495,15 @@ sub buildUserEntry {
 	}
     }
 
+    #LP: changePasswordAtNextLogin
+    if ($xml->{'apps:login'}[0]{'changePasswordAtNextLogin'}) {
+	if ($xml->{'apps:login'}[0]{'changePasswordAtNextLogin'} eq 'true') {
+	    $entry->changePasswordAtNextLogin(1);
+	} else {
+	    $entry->changePasswordAtNextLogin(0);
+	}
+    }    
+
     $entry->FamilyName($xml->{'apps:name'}[0]{'familyName'});
     $entry->GivenName($xml->{'apps:name'}[0]{'givenName'});
     $entry->Quota($xml->{'apps:quota'}[0]{'limit'});
@@ -1594,10 +1616,17 @@ sub new {
     my $object = shift;
     my $class = ref($object) || $object;
 
-    my ($user, $password, $family_name, $given_name, $quota, $email, $isSuspended);
+
+    #LP: changePasswordAtNextLogin
+    my ($user, $password, $family_name, $given_name, $quota, $email, $isSuspended, $changePasswordAtNextLogin);
 
     if (defined $isSuspended) {
 	$isSuspended = ($isSuspended)? '1' : '0';
+    }
+
+    #LP: changePasswordAtNextLogin
+    if (defined $changePasswordAtNextLogin) {
+	$changePasswordAtNextLogin = ($changePasswordAtNextLogin)? '1' : '0';
     }
 
     # This doesn't quite match the Java API but I don't really care right now.
@@ -1610,8 +1639,11 @@ sub new {
 	'FamilyName' => $family_name,
 	'GivenName' => $given_name,
 	'Email' => $email,
-	'Quota' => $quota
+	'Quota' => $quota,
+    #LP: changePasswordAtNextLogin
+	'changePasswordAtNextLogin' => $changePasswordAtNextLogin
     };
+        
     bless $self, $class;
     return $self;
 }
@@ -1633,6 +1665,23 @@ sub isSuspended {
 	}
     }
     return $self->{'isSuspended'};
+}
+
+#LP: changePasswordAtNextLogin
+sub changePasswordAtNextLogin {
+    my $self = shift;
+    my $changePassword = shift;
+
+    if (defined $changePassword) {
+	if (lc($changePassword) eq 'false') {
+	    $self->{'changePasswordAtNextLogin'} = 0;
+	} elsif (not $changePassword) {
+	    $self->{'changePasswordAtNextLogin'} = 0;
+	} else {
+	    $self->{'changePasswordAtNextLogin'} = 1;
+	}
+    }
+    return $self->{'changePasswordAtNextLogin'};
 }
 
 sub DESTROY { };
