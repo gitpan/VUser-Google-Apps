@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 # Copyright 2005 Randy Smith <perlstalker@vuser.org>
-# $Id: Makefile.PL,v 1.1 2007/09/17 16:13:05 perlstalker Exp $
+# $Id: Makefile.PL,v 1.1 2007-09-17 16:13:05 perlstalker Exp $
 
 use ExtUtils::MakeMaker;
 
@@ -16,13 +16,8 @@ WriteMakefile(
 				  'VUser::Extension' => '0.2.0',
 				  'VUser::Log'       => '0.2.0',
 				  'VUser::ExtHandler'=> '0.3.2',
-				  #'VUser::Google::ProvisioningAPI' => '0.20',
-				  'Carp' => 0,
-				  'LWP::UserAgent' => 0,
-				  'HTTP::Request' => 0,
-				  'Encode' => 0,
-				  'XML::Simple' => 0
-				  }, # e.g., Module::Name => 1.1
+				  'VUser::Google::ProvisioningAPI' => '0.22'
+				  }
 
 	      );
 
